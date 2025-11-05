@@ -59,6 +59,7 @@ def main() -> int:
                 return 0
 
             response = supervisor_agent(user_input)
+            print("\nRESPONSE:\n")
             print(str(response))
 
         except KeyboardInterrupt:

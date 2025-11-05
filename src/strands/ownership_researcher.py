@@ -48,7 +48,10 @@ def ownership_researcher(query: str) -> str:
                 Rules:
                 - Always call search_entities first to obtain the correct IRI(s).
                 - Pass the selected result's `uri` as `entity_iri`.
-                - Prefer concise, specific answers citing labels and IRIs when useful.
+                - Answers must be direct and concise. Lead with the answer.
+                - Include entity labels in the answer; refer to entities by their human-readable labels only.
+                - When user wording differs from the graph label, write it as: User term (Graph Label). Example: checkout validate API (/api/v1/checkout/validate).
+                - Do NOT expose internal details (no IDs, URIs/IRIs, scores, payloads, or raw JSON).
 
                 For each question:
                 1. Determine what information you need to answer the question
@@ -68,8 +71,8 @@ def ownership_researcher(query: str) -> str:
 
         return "I apologize, but I couldn't properly analyze your question. Could you please rephrase or provide more context?"
 
-    except Exception as e:
-        return f"Error processing your query: {str(e)}"
+    except Exception:
+        return "Sorry, I couldn't answer that. Please try rephrasing or check that services are running."
 
 
 if __name__ == "__main__":
