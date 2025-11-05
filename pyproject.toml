@@ -11,9 +11,9 @@ rdflib = "^7.4.0"
 qdrant-client = "^1.15.1"
 litellm = "^1.79.1"
 fastmcp = "^2.13.0.2"
-strands = "^0.1.0"
-strands-tools = "^0.1.0"
 mcp = "^1.0.0"
+strands-agents-tools = "^0.2.14"
+strands-agents = {extras = ["ollama"], version = "^1.15.0"}
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"

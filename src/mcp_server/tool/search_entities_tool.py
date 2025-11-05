@@ -1,4 +1,10 @@
-"""Tool for performing semantic vector search for entities."""
+"""Tool for performing semantic vector search for entities.
+
+Use this tool first to find candidate entities. The returned `uri` value of a
+result is the entity IRI that should be passed to:
+- `find_resource_owner(entity_iri=<resource IRI>)` for owners
+- `find_resources_owned_by_team(entity_iri=<team IRI>)` for a team's resources
+"""
 
 from typing import List
 from pydantic import BaseModel, Field

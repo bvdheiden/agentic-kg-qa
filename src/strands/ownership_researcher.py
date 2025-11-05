@@ -1,10 +1,11 @@
 from mcp import StdioServerParameters, stdio_client
 from strands import Agent, tool
+from src.strands.llm import ollama_model
 from strands.tools.mcp import MCPClient
 
 
 @tool
-def knowledge_graph_researcher(query: str) -> str:
+def ownership_researcher(query: str) -> str:
     """
     Process and respond to queries about the knowledge graph (teams, services, endpoints).
 
@@ -34,20 +35,27 @@ def knowledge_graph_researcher(query: str) -> str:
 
             # Create the QA agent with access to knowledge graph tools
             qa_agent = Agent(
+                model=ollama_model,
                 system_prompt="""You are a knowledge graph expert specialized in answering
                 questions about teams, services, and endpoints in the organization.
 
-                You have access to two tools:
-                1. search_entities: Use this to find entities by semantic search
-                2. find_owner: Use this to find which team owns a specific entity
+                Tools and required order:
+                1) search_entities(query): returns candidates with `uri` (entity IRI)
+                2) Then choose one based on the question:
+                   - find_resource_owner(entity_iri): given a resource IRI, return its owning team
+                   - find_resources_owned_by_team(entity_iri): given a team IRI, list owned resources
+
+                Rules:
+                - Always call search_entities first to obtain the correct IRI(s).
+                - Pass the selected result's `uri` as `entity_iri`.
+                - Prefer concise, specific answers citing labels and IRIs when useful.
 
                 For each question:
                 1. Determine what information you need to answer the question
-                2. Use the appropriate tool(s) to query the knowledge graph
+                2. Use the appropriate tool(s) in the order above
                 3. Extract relevant information from the results
                 4. Synthesize a clear, comprehensive answer
 
-                Always be specific about which entities you found and their relationships.
                 If you can't find information, clearly state that.
                 """,
                 tools=tools,
@@ -65,4 +73,4 @@ def knowledge_graph_researcher(query: str) -> str:
 
 
 if __name__ == "__main__":
-    knowledge_graph_researcher("What services are owned by the Platform team?")
+    ownership_researcher("What services are owned by the Platform team?")

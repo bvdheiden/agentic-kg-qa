@@ -4,21 +4,27 @@ MCP Server using fastmcp to expose tools for querying the ontology.
 This server connects to the Fuseki and Qdrant databases populated by
 the bootstrap.py script.
 
-It exposes two tools:
-1. search_entities: Performs semantic search for entities.
-2. find_owner: Finds the owning team for a given resource.
+Tools and usage order:
+1. search_entities(query): Perform semantic search. Use the returned `uri` as the entity IRI.
+2. find_resource_owner(entity_iri): Given a resource IRI, find the owning team.
+3. find_resources_owned_by_team(entity_iri): Given a team IRI, list owned resources.
+
+Always run `search_entities` first to obtain the correct `entity_iri` for graph queries,
+then call `find_resource_owner` with that value.
 """
 
 from fastmcp import FastMCP
 from src.mcp_server.tool.search_entities_tool import search_entities
-from src.mcp_server.tool.find_owner_tool import find_owner
+from src.mcp_server.tool.find_resource_owner_tool import find_resource_owner
+from src.mcp_server.tool.find_resources_owned_by_team_tool import find_resources_owned_by_team
 
 # Create the MCP server
 mcp = FastMCP("Ontology Knowledge Graph Server")
 
 # Register tools
 mcp.tool(search_entities)
-mcp.tool(find_owner)
+mcp.tool(find_resource_owner)
+mcp.tool(find_resources_owned_by_team)
 
 
 def main():
@@ -26,9 +32,10 @@ def main():
     Main function to run the fastmcp server.
     """
     print("Starting MCP server...")
-    print("Available tools:")
-    print("- search_entities")
-    print("- find_owner")
+    print("Available tools (use in this order):")
+    print("1) search_entities(query) -> results[0].uri")
+    print("2) find_resource_owner(entity_iri=<resource IRI>)")
+    print("3) find_resources_owned_by_team(entity_iri=<team IRI>)")
 
     # Run the server
     mcp.run()
