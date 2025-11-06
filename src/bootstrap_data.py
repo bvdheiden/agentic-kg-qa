@@ -11,7 +11,7 @@ from typing import List, Dict, Tuple
 
 class Config:
     """Configuration constants."""
-    FUSEKI_URL = "http://localhost:3030"
+    FUSEKI_URL = "http://localhost:3031"
     DATASET_NAME = "ontology"
     FUSEKI_AUTH = ("admin", "admin")
     QDRANT_HOST = "localhost"

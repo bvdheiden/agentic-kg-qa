@@ -5,7 +5,7 @@ from rdflib import Namespace
 
 class Config:
     """Configuration constants (mirrored from bootstrap.py)."""
-    FUSEKI_URL = "http://localhost:3030"
+    FUSEKI_URL = "http://localhost:3031"
     DATASET_NAME = "ontology"
     FUSEKI_AUTH = ("admin", "admin")
     QDRANT_HOST = "localhost"

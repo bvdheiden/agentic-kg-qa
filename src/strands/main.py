@@ -9,10 +9,32 @@ Example queries:
 - What services does the Platform team own?
 """
 
+
+import base64
+import os
+
+from dotenv import load_dotenv
+
+from strands.telemetry import StrandsTelemetry
 from src.strands.ownership_researcher import ownership_researcher
 from strands import Agent
 from src.strands.llm import ollama_model
 from strands_tools import think
+
+
+load_dotenv()
+
+LANGFUSE_PUBLIC_KEY = os.environ["LANGFUSE_PUBLIC_KEY"]
+LANGFUSE_SECRET_KEY = os.environ["LANGFUSE_SECRET_KEY"]
+LANGFUSE_BASE_URL = os.environ["LANGFUSE_BASE_URL"]
+os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{LANGFUSE_BASE_URL}/api/public/otel"
+LANGFUSE_AUTH = base64.b64encode(f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()).decode()
+os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {LANGFUSE_AUTH}"
+
+
+telemetry = StrandsTelemetry()
+telemetry.setup_otlp_exporter()
+telemetry.setup_meter(enable_otlp_exporter=True)
 
 
 SUPERVISOR_AGENT_PROMPT = """
