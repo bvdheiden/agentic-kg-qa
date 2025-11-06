@@ -21,7 +21,8 @@ Extraction is a local agent workspace for exploring a service ownership knowledg
 |-- experiments/extraction.ipynb    # Notebook for exploratory work
 |-- .env.example                    # Template for Langfuse and related settings
 |-- poetry.lock / pyproject.toml    # Poetry project definition
-\-- langfuse/                       # Langfuse SDK (external dependency; leave untouched)
+\-- librechat/                      # LibreChat web UI submodule (leave untouched)
+\-- langfuse/                       # Langfuse LLM telemetry suite (leave untouched)
 ```
 
 ### Key Modules
@@ -81,6 +82,7 @@ Start the supporting stacks shipped with the Langfuse and LibreChat submodules:
 docker compose up -d
 ```
 Run the command above once from `langfuse/` to bring up telemetry services and again from `librechat/` to launch the chat UI. Use `docker compose down` within each directory to stop the respective services.
+LibreChat provides a bundled web UI for chatting with the agent stack; start it from the `librechat/` directory when you need an in-browser client.
 
 ### 2. Bootstrap the knowledge graph
 ```
