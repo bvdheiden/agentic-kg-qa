@@ -42,4 +42,5 @@
 - Entrypoints are declared in `pyproject.toml` under `[tool.poetry.scripts]` (`mcp_server`, `strands`, `bootstrap_data`).
 - Keep changes minimal and focused; follow the directory layout above.
 - If you add new commands, update this document and `pyproject.toml` scripts.
+- Keep `README.md` in sync with changes whenever new capabilities, setup steps, or usage patterns are introduced. Update it alongside any relevant modifications when possible.
 - Treat the `langfuse/` directory as an external dependency; do not modify or inspect its contents.
