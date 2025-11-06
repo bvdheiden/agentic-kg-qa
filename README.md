@@ -37,8 +37,8 @@ Extraction is a local agent workspace for exploring a service ownership knowledg
 
 ### Data Flow
 1. `poetry run bootstrap_data` generates ontology triples, writes them to Fuseki, and syncs entity embeddings into Qdrant.
-2. The FastMCP server (`poetry run mcp_server`) exposes search and reasoning tools backed by Fuseki and Qdrant.
-3. The Strands CLI agent (`poetry run strands`) launches, connects to the MCP server over stdio, and orchestrates tool calls to answer natural language questions.
+2. `poetry run strands` launches the Strands CLI agent, starts the FastMCP server automatically, and connects to it over stdio.
+3. Agent tool calls orchestrate searches and graph reasoning to answer natural language questions.
 
 ## Prerequisites
 - Python 3.10 and Poetry (`pip install poetry`)
@@ -76,23 +76,23 @@ docker compose -f services/docker-compose.yaml up -d
 ```
 This spins up Apache Fuseki on port 3031 and Qdrant on port 6333. Use `docker compose -f services/docker-compose.yaml down` to stop them.
 
+Start the supporting stacks shipped with the Langfuse and LibreChat submodules:
+```
+docker compose up -d
+```
+Run the command above once from `langfuse/` to bring up telemetry services and again from `librechat/` to launch the chat UI. Use `docker compose down` within each directory to stop the respective services.
+
 ### 2. Bootstrap the knowledge graph
 ```
 poetry run bootstrap_data
 ```
 The script recreates the Fuseki dataset, uploads ontology triples, builds embeddings, and upserts them into Qdrant. Re-run whenever you change ontology data.
 
-### 3. Run the MCP server
-```
-poetry run mcp_server
-```
-The FastMCP server prints available tools (`search_entities`, `reason_graph`, `find_resource_owner`, `find_resources_owned_by_team`) and awaits incoming MCP clients.
-
-### 4. Launch the Strands CLI agent
+### 3. Launch the Strands CLI agent
 ```
 poetry run strands
 ```
-The CLI loads Langfuse telemetry configuration from the environment, connects to the MCP server via stdio, and provides an interactive prompt. Type `exit` to quit.
+The CLI loads Langfuse telemetry configuration from the environment, starts the FastMCP server automatically, and provides an interactive prompt. Type `exit` to quit.
 
 ## Development and Testing
 - Run the automated test suite (additions should live under `tests/` mirroring `src/`):
@@ -108,4 +108,3 @@ The CLI loads Langfuse telemetry configuration from the environment, connects to
 - Langfuse telemetry requires reachable `LANGFUSE_BASE_URL`; set `OTEL_EXPORTER_OTLP_HEADERS` only after generating credentials.
 - The `langfuse/` directory is vendored; avoid modifying it to keep upstream updates simple.
 - For verbose logs, tail `docker compose -f services/docker-compose.yaml logs -f fuseki qdrant`.
-
