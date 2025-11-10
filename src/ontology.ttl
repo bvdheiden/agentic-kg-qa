@@ -1,0 +1,21 @@
+@prefix voc: <http://bvdheiden.nl/data/#voc/> .
+@prefix data: <http://bvdheiden.nl/data/#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+voc:Resource a owl:Class ;
+    rdfs:label "Resource" .
+
+voc:Team a owl:Class ;
+    rdfs:label "Team" .
+
+voc:containedIn a owl:ObjectProperty ;
+    rdfs:label "contained in" ;
+    rdfs:domain voc:Resource ;
+    rdfs:range voc:Resource .
+
+voc:ownedBy a owl:ObjectProperty ;
+    rdfs:label "owned by" ;
+    rdfs:domain voc:Resource ;
+    rdfs:range voc:Team .
