@@ -1,17 +1,17 @@
 import base64
-import json
+import logging
 import os
-from typing import Any
-from uuid import uuid4
 
 from dotenv import load_dotenv
+from mcp import StdioServerParameters, stdio_client
 
 from strands.telemetry import StrandsTelemetry
-from src.strands.query_graph_agent import query_graph_agent
-from src.strands.search_entities_agent import search_entities_agent
-from strands import Agent
+from src.strands.query_graph_agent import create_query_graph_agent
+from src.strands.search_entities_agent import create_search_entities_agent
+from src.strands.reporter_agent import create_reporter_agent
+from strands.multiagent import GraphBuilder
+from strands.tools.mcp import MCPClient
 from src.strands.llm import ollama_model
-from strands_tools import workflow
 
 
 load_dotenv()
@@ -28,92 +28,95 @@ telemetry = StrandsTelemetry()
 telemetry.setup_otlp_exporter()
 telemetry.setup_meter(enable_otlp_exporter=True)
 
-WORKFLOW_SUPERVISOR_PROMPT = """
-You orchestrate the Knowledge Graph QA workflow. For every user question you:
-1. Trigger the semantic search stage (search_entities_agent) to gather candidate IRIs.
-2. Pass the collected context into the querying stage (query_graph_agent) to execute SPARQL.
-3. Report the final synthesized answer grounded in Fuseki results.
-Always keep the workflow deterministic and document each stage with the workflow tool.
-"""
+# Enable debug logs for multiagent
+logging.getLogger("strands.multiagent").setLevel(logging.DEBUG)
+logging.basicConfig(
+    format="%(levelname)s | %(name)s | %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
-GRAPH_QA_WORKFLOW_TASKS = [
-    {
-        "task_id": "entity_search",
-        "description": "Map the user question to ontology IRIs via semantic search.",
-        "system_prompt": """
-You are the Entity Discovery agent. Call `search_entities_agent` with the original user
-question and capture the JSON response so downstream agents can use it.
-""".strip(),
-        "priority": 5,
-    },
-    {
-        "task_id": "graph_query",
-        "description": "Use Fuseki query_graph to answer the validated question.",
-        "dependencies": ["entity_search"],
-        "system_prompt": """
-You are the Graph Query agent. Combine the user question with the JSON output returned
-by `search_entities_agent` and call `query_graph_agent` to obtain the final answer.
-""".strip(),
-        "priority": 4,
-    },
-]
-
-
-def create_workflow_agent() -> Agent:
-    """Create the workflow supervisor agent with the workflow tool."""
-    return Agent(
-        model=ollama_model,
-        system_prompt=WORKFLOW_SUPERVISOR_PROMPT,
-        tools=[workflow],
+# Create shared MCP client
+kg_mcp_client = MCPClient(
+    lambda: stdio_client(
+        StdioServerParameters(
+            command="python",
+            args=["-m", "src.mcp_server.main"],
+        )
     )
+)
 
 
-workflow_agent = create_workflow_agent()
+def create_graph_workflow(mcp_client: MCPClient):
+    """Create the multi-agent graph workflow for knowledge graph QA."""
+    # Create specialized agents
+    search_agent = create_search_entities_agent(mcp_client)
+    query_agent = create_query_graph_agent(mcp_client)
+    reporter_agent = create_reporter_agent()
 
+    # Build the graph
+    builder = GraphBuilder()
 
-def _parse_search_output(raw_output: str) -> dict[str, Any]:
-    """Convert the search_entities_agent output into a dict for downstream tasks."""
-    try:
-        parsed = json.loads(raw_output)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    return {"search_summary": raw_output}
+    # Add nodes
+    builder.add_node(search_agent, "entity_search")
+    builder.add_node(query_agent, "graph_query")
+    builder.add_node(reporter_agent, "report_writer")
+
+    # Add edges (dependencies)
+    builder.add_edge("entity_search", "graph_query")
+    builder.add_edge("graph_query", "report_writer")
+
+    # Set entry point
+    builder.set_entry_point("entity_search")
+
+    # Configure execution timeout (10 minutes)
+    builder.set_execution_timeout(600)
+
+    # Build and return the graph
+    return builder.build()
 
 
 def run_graph_workflow(question: str) -> str:
-    """Execute the deterministic search -> query workflow for the given question."""
-    workflow_id = f"graph_qa_{uuid4().hex[:8]}"
+    """Execute the graph-based multi-agent workflow for the given question."""
+    # Use the MCP client context manager
+    with kg_mcp_client:
+        # Create the graph workflow within the context
+        graph_workflow = create_graph_workflow(kg_mcp_client)
 
-    workflow_agent.tool.workflow(
-        action="create",
-        workflow_id=workflow_id,
-        tasks=GRAPH_QA_WORKFLOW_TASKS,
-    )
-    workflow_agent.tool.workflow(
-        action="start",
-        workflow_id=workflow_id,
-        input=question,
-    )
+        # Execute the workflow
+        result = graph_workflow(question)
 
-    search_metadata = _parse_search_output(search_entities_agent(question))
+        # Return the final result from the report_writer agent
+        if result.status.value == "completed":
+            # Get the NodeResult from the last node (report_writer)
+            node_result = result.results.get("report_writer")
+            if node_result and hasattr(node_result, 'result'):
+                # Extract the AgentResult
+                agent_result = node_result.result
+                if hasattr(agent_result, 'message') and 'content' in agent_result.message:
+                    # Extract text from the message content
+                    content = agent_result.message['content']
+                    if isinstance(content, list) and len(content) > 0:
+                        # Get the text from the first content block
+                        if isinstance(content[0], dict) and 'text' in content[0]:
+                            return content[0]['text']
+                # Fallback: try to get text representation
+                return str(agent_result.message.get('content', 'No result available'))
+            return "No result available"
+        else:
+            error_msg = getattr(result, 'error', 'Unknown error')
+            return f"I encountered an issue while processing your question: {error_msg}"
 
-    query_payload = json.dumps(
-        {
-            "question": question,
-            "search_context": search_metadata,
-        }
-    )
-    response = query_graph_agent(query_payload)
 
-    try:
-        workflow_agent.tool.workflow(action="status", workflow_id=workflow_id)
-    except Exception:
-        # Swallow workflow status errors so the CLI can continue responding.
-        pass
+class WorkflowSupervisorAgent:
+    """Lightweight callable wrapper to expose run_graph_workflow."""
 
-    return response
+    def __call__(self, question: str) -> str:
+        return run_graph_workflow(question)
+
+
+def create_supervisor_agent() -> WorkflowSupervisorAgent:
+    """Preserve the historical supervisor factory for UI callers."""
+    return WorkflowSupervisorAgent()
 
 
 def main() -> int:

@@ -1,7 +1,7 @@
 from typing import List
 
 from mcp import StdioServerParameters, stdio_client
-from strands import Agent, tool
+from strands import Agent
 from strands.tools.mcp import MCPClient, MCPAgentTool
 
 from src.strands.llm import ollama_model
@@ -35,16 +35,10 @@ def _filter_search_tools(tools: List[MCPAgentTool]) -> List[MCPAgentTool]:
     return [tool for tool in tools if tool.mcp_tool.name == "search_entities"]
 
 
-@tool
-def search_entities_agent(query: str) -> str:
-    """LLM-powered wrapper around the search_entities MCP tool."""
-
-    formatted_query = query.strip()
-    if not formatted_query:
-        return "Please provide a non-empty query."
-
-    try:
-        kg_mcp_server = MCPClient(
+def create_search_entities_agent(mcp_client: MCPClient = None) -> Agent:
+    """Create and return the entity search agent with MCP tools."""
+    if mcp_client is None:
+        mcp_client = MCPClient(
             lambda: stdio_client(
                 StdioServerParameters(
                     command="python",
@@ -53,32 +47,16 @@ def search_entities_agent(query: str) -> str:
             )
         )
 
-        with kg_mcp_server:
-            available_tools = kg_mcp_server.list_tools_sync()
-            search_tools = _filter_search_tools(available_tools)
-            if not search_tools:
-                return "The search_entities tool is unavailable. Please ensure the MCP server is running."
+    # Get MCP tools from the client
+    available_tools = mcp_client.list_tools_sync()
+    search_tools = _filter_search_tools(available_tools)
 
-            entity_agent = Agent(
-                model=ollama_model,
-                system_prompt=SYSTEM_PROMPT,
-                tools=search_tools,
-            )
-
-            user_message = f"""
-User question: {formatted_query}
-
-Identify relevant entity mentions and call `search_entities` for each one.
-Return the JSON schema described in your instructions.
-"""
-            response = str(entity_agent(user_message.strip()))
-
-        if response:
-            return response
-        return "Entity discovery did not return any results."
-
-    except Exception as exc:
-        return f"search_entities_agent failed: {exc}"
+    return Agent(
+        name="search_entities",
+        model=ollama_model,
+        system_prompt=SYSTEM_PROMPT,
+        tools=search_tools if search_tools else [],
+    )
 
 
 if __name__ == "__main__":

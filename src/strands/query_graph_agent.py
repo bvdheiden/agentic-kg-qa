@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
+from uuid import uuid4
 
 from mcp import StdioServerParameters, stdio_client
 from strands import Agent, tool
@@ -51,34 +52,47 @@ def _parse_query_payload(raw_input: str) -> Dict[str, object]:
     return {"question": raw_input.strip()}
 
 
-@tool
-def query_graph_agent(payload: str) -> str:
-    """
-    Execute SELECT queries against Fuseki using the query_graph MCP tool.
-    Payload should include:
-    - question: the original user request (required)
-    - search_context: JSON from search_entities_agent (optional but recommended)
-    """
+def _format_tool_result(result: Dict[str, Any]) -> str:
+    """Extract structured content from an MCP tool response."""
+    structured = result.get("structuredContent")
+    if structured is not None:
+        if isinstance(structured, (dict, list)):
+            return json.dumps(structured, indent=2)
+        return str(structured)
 
-    payload_dict = _parse_query_payload(payload)
-    question = payload_dict.get("question", "").strip()
-    if not question:
-        return "Please provide a question to analyze."
+    for block in result.get("content", []):
+        if "json" in block:
+            return json.dumps(block["json"], indent=2)
+        if "text" in block:
+            return block["text"]
+    return json.dumps(result, indent=2)
 
-    search_context = payload_dict.get("search_context")
-    context_block = json.dumps(search_context, indent=2) if search_context is not None else "None provided."
 
-    user_message = f"""
-User question: {question}
+def _build_bounded_query_tool(client: MCPClient):
+    """Create a tool that proxies query_graph while enforcing the max limit."""
 
-Search context (from search_entities_agent):
-{context_block}
+    @tool(name="query_graph")
+    def query_graph_bounded(sparql_query: str, limit: int | None = None) -> str:
+        effective_limit = limit if isinstance(limit, int) and limit > 0 else QUERY_LIMIT
+        bounded_limit = min(effective_limit, MAX_QUERY_LIMIT)
+        result = client.call_tool_sync(
+            tool_use_id=str(uuid4()),
+            name="query_graph",
+            arguments={"sparql_query": sparql_query, "limit": bounded_limit},
+        )
+        return _format_tool_result(result)
 
-Use this context to craft one or more SELECT statements. Always call query_graph with limit={QUERY_LIMIT} before answering.
-"""
+    query_graph_bounded.__doc__ = (
+        "Execute SELECT queries against Fuseki. Defaults to "
+        f"limit={QUERY_LIMIT} and caps at limit={MAX_QUERY_LIMIT}."
+    )
+    return query_graph_bounded
 
-    try:
-        kg_mcp_server = MCPClient(
+
+def create_query_graph_agent(mcp_client: MCPClient = None) -> Agent:
+    """Create and return the query graph agent with MCP tools."""
+    if mcp_client is None:
+        mcp_client = MCPClient(
             lambda: stdio_client(
                 StdioServerParameters(
                     command="python",
@@ -87,25 +101,16 @@ Use this context to craft one or more SELECT statements. Always call query_graph
             )
         )
 
-        with kg_mcp_server:
-            available_tools = kg_mcp_server.list_tools_sync()
-            query_tools = _filter_query_tools(available_tools)
-            if not query_tools:
-                return "The query_graph tool is unavailable. Please ensure the MCP server is running."
+    # Get MCP tools from the client
+    available_tools = mcp_client.list_tools_sync()
+    query_tools = _filter_query_tools(available_tools)
 
-            qa_agent = Agent(
-                model=ollama_model,
-                system_prompt=SYSTEM_PROMPT,
-                tools=query_tools,
-            )
-            response = str(qa_agent(user_message.strip()))
-
-        if response:
-            return response
-        return "I couldn't synthesize an answer from the query results."
-
-    except Exception as exc:
-        return f"Sorry, I couldn't complete that analysis: {exc}"
+    return Agent(
+        name="query_graph",
+        model=ollama_model,
+        system_prompt=SYSTEM_PROMPT,
+        tools=query_tools if query_tools else [],
+    )
 
 
 if __name__ == "__main__":
