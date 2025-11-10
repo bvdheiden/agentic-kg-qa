@@ -1,7 +1,8 @@
 """Bootstrap script for initializing graph and vector databases with ontology and data."""
 
 import requests
-from rdflib import Graph, Namespace, RDF, RDFS, OWL, Literal
+from pathlib import Path
+from rdflib import Graph, Namespace, RDF, RDFS, Literal
 from rdflib.namespace import XSD
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -126,45 +127,12 @@ class QdrantService:
             print(f"Error uploading to Qdrant: {e}")
 
 
-class OntologyBuilder:
-    """Builder for creating RDF ontology."""
-
-    def __init__(self):
-        self.graph = Graph()
-        self._bind_namespaces()
-
-    def _bind_namespaces(self) -> None:
-        """Bind namespaces to graph."""
-        self.graph.bind("voc", Config.VOC)
-        self.graph.bind("data", Config.DATA)
-        self.graph.bind("owl", OWL)
-        self.graph.bind("rdf", RDF)
-        self.graph.bind("rdfs", RDFS)
-
-    def define_classes(self) -> 'OntologyBuilder':
-        """Define ontology classes."""
-        self.graph.add((Config.VOC.Resource, RDF.type, OWL.Class))
-        self.graph.add((Config.VOC.Resource, RDFS.label, Literal("Resource")))
-        self.graph.add((Config.VOC.Team, RDF.type, OWL.Class))
-        self.graph.add((Config.VOC.Team, RDFS.label, Literal("Team")))
-        return self
-
-    def define_properties(self) -> 'OntologyBuilder':
-        """Define ontology properties."""
-        self.graph.add((Config.VOC.containedIn, RDF.type, OWL.ObjectProperty))
-        self.graph.add((Config.VOC.containedIn, RDFS.label, Literal("contained in")))
-        self.graph.add((Config.VOC.containedIn, RDFS.domain, Config.VOC.Resource))
-        self.graph.add((Config.VOC.containedIn, RDFS.range, Config.VOC.Resource))
-
-        self.graph.add((Config.VOC.ownedBy, RDF.type, OWL.ObjectProperty))
-        self.graph.add((Config.VOC.ownedBy, RDFS.label, Literal("owned by")))
-        self.graph.add((Config.VOC.ownedBy, RDFS.domain, Config.VOC.Resource))
-        self.graph.add((Config.VOC.ownedBy, RDFS.range, Config.VOC.Team))
-        return self
-
-    def build(self) -> Graph:
-        """Return the built graph."""
-        return self.graph
+def load_ontology_graph() -> Graph:
+    """Load the ontology turtle file located alongside this module."""
+    ontology_path = Path(__file__).resolve().parent / "ontology.ttl"
+    graph = Graph()
+    graph.parse(ontology_path, format="turtle")
+    return graph
 
 
 class DataPopulator:
@@ -390,7 +358,7 @@ class Bootstrap:
         self.fuseki.create_dataset()
 
         print("\n3. Building and uploading ontology...")
-        ontology = OntologyBuilder().define_classes().define_properties().build()
+        ontology = load_ontology_graph()
         self.fuseki.upload_graph(ontology)
 
         print("\n4. Building and uploading data...")

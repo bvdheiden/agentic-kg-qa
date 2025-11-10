@@ -16,6 +16,7 @@ strands-agents-tools = "^0.2.14"
 strands-agents = {extras = ["otel", "ollama"], version = "^1.15.0"}
 langfuse = "^3.9.1"
 python-dotenv = "^1.2.1"
+streamlit = "^1.51.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
@@ -24,6 +25,7 @@ pytest = "^5.2"
 bootstrap_data = "src.bootstrap_data:main"
 mcp_server = "src.mcp_server.main:main"
 strands = "src.strands.main:main"
+ui = "src.ui.runner:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

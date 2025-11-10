@@ -12,11 +12,11 @@ Extraction is a local agent workspace for exploring a service ownership knowledg
 |   |   |-- main.py                 # FastMCP entrypoint exposing graph tools
 |   |   |-- config.py               # Central config for hosts, ports, namespaces
 |   |   |-- service/                # Fuseki, Qdrant, embedding, validation helpers
-|   |   \-- tool/                   # Tool definitions (search, ownership, reasoning)
+|   |   \-- tool/                   # Tool definitions (semantic search + SPARQL execution)
 |   \-- strands/
 |       |-- main.py                 # Strands CLI entrypoint
 |       |-- llm.py                  # Shared Ollama model configuration
-|       \-- ownership_researcher.py # Agent tool bridging to the MCP server
+|       \-- graph_query_agent.py    # Agent tool bridging to the MCP server
 |-- services/docker-compose.yaml    # Local Fuseki and Qdrant services
 |-- experiments/extraction.ipynb    # Notebook for exploratory work
 |-- .env.example                    # Template for Langfuse and related settings
@@ -28,13 +28,12 @@ Extraction is a local agent workspace for exploring a service ownership knowledg
 ### Key Modules
 - `src/mcp_server/config.py`: canonical host, port, and namespace configuration shared across services and tools.
 - `src/mcp_server/tool/search_entities_tool.py`: vector search against Qdrant to locate IRIs for later graph queries.
-- `src/mcp_server/tool/reason_graph_tool.py`: builds and validates SPARQL to inspect incoming and outgoing relationships.
-- `src/mcp_server/tool/find_resource_owner_tool.py`: determines the owning team for a resource after validating ontology types.
-- `src/mcp_server/tool/find_resources_owned_by_team_tool.py`: enumerates assets owned by a team, including indirect containment paths.
+- `src/mcp_server/tool/query_graph_tool.py`: validates SELECT-only SPARQL submitted by the agent before executing it.
 - `src/mcp_server/service/`: infrastructure clients for Fuseki, Qdrant, embedding generation, and ontology validation routines.
-- `src/strands/main.py`: Strands CLI entrypoint wiring Langfuse telemetry and the ownership researcher tool.
-- `src/strands/ownership_researcher.py`: wraps the MCP server tooling behind a Strands agent workflow.
+- `src/strands/main.py`: Strands CLI entrypoint wiring Langfuse telemetry and the graph query agent tool.
+- `src/strands/graph_query_agent.py`: wraps the MCP server tooling, running search first and then executing SPARQL queries.
 - `src/bootstrap_data.py`: prepares the ontology RDF graph and embeddings, then loads Fuseki and Qdrant.
+- `src/ontology.ttl`: Turtle schema describing classes and properties loaded into Fuseki during bootstrap.
 
 ### Data Flow
 1. `poetry run bootstrap_data` generates ontology triples, writes them to Fuseki, and syncs entity embeddings into Qdrant.

@@ -1,25 +1,17 @@
-"""Knowledge Graph QA Agent
-
-An agent specialized in answering questions about teams, services,
-and endpoints using the ontology knowledge graph MCP server.
-
-Example queries:
-- Who owns the Payment Service?
-- Find all endpoints in the User Service
-- What services does the Platform team own?
-"""
-
-
 import base64
+import json
 import os
+from typing import Any
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
 from strands.telemetry import StrandsTelemetry
-from src.strands.ownership_researcher import ownership_researcher
+from src.strands.query_graph_agent import query_graph_agent
+from src.strands.search_entity_agent import search_entity_agent
 from strands import Agent
 from src.strands.llm import ollama_model
-from strands_tools import think
+from strands_tools import workflow
 
 
 load_dotenv()
@@ -36,30 +28,95 @@ telemetry = StrandsTelemetry()
 telemetry.setup_otlp_exporter()
 telemetry.setup_meter(enable_otlp_exporter=True)
 
-
-SUPERVISOR_AGENT_PROMPT = """
-You are a Knowledge Graph QA Agent, designed to answer questions about the
-organization's services, endpoints, and team ownership.
-
-Your role is to:
-1. Understand user queries about:
-   - Teams and what they own
-   - Services and their endpoints
-   - Ownership relationships
-
-2. Use the ownership_researcher tool to query the knowledge graph
-
-3. Provide clear, accurate answers based on the knowledge graph data
-
-Always confirm you understand the question before querying the knowledge graph.
+WORKFLOW_SUPERVISOR_PROMPT = """
+You orchestrate the Knowledge Graph QA workflow. For every user question you:
+1. Trigger the semantic search stage (search_entity_agent) to gather candidate IRIs.
+2. Pass the collected context into the querying stage (query_graph_agent) to execute SPARQL.
+3. Report the final synthesized answer grounded in Fuseki results.
+Always keep the workflow deterministic and document each stage with the workflow tool.
 """
 
+GRAPH_QA_WORKFLOW_TASKS = [
+    {
+        "task_id": "entity_search",
+        "description": "Map the user question to ontology IRIs via semantic search.",
+        "system_prompt": """
+You are the Entity Discovery agent. Call `search_entity_agent` with the original user
+question and capture the JSON response so downstream agents can use it.
+""".strip(),
+        "priority": 5,
+    },
+    {
+        "task_id": "graph_query",
+        "description": "Use Fuseki query_graph to answer the validated question.",
+        "dependencies": ["entity_search"],
+        "system_prompt": """
+You are the Graph Query agent. Combine the user question with the JSON output returned
+by `search_entity_agent` and call `query_graph_agent` to obtain the final answer.
+""".strip(),
+        "priority": 4,
+    },
+]
 
-supervisor_agent = Agent(
-    model=ollama_model,
-    system_prompt=SUPERVISOR_AGENT_PROMPT,
-    tools=[ownership_researcher, think],
-)
+
+def create_workflow_agent() -> Agent:
+    """Create the workflow supervisor agent with the workflow tool."""
+    return Agent(
+        model=ollama_model,
+        system_prompt=WORKFLOW_SUPERVISOR_PROMPT,
+        tools=[workflow],
+    )
+
+
+workflow_agent = create_workflow_agent()
+
+
+def _parse_search_output(raw_output: str) -> dict[str, Any]:
+    """Convert the search_entity_agent output into a dict for downstream tasks."""
+    try:
+        parsed = json.loads(raw_output)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return {"search_summary": raw_output}
+
+
+def run_graph_workflow(question: str) -> str:
+    """Execute the deterministic search -> query workflow for the given question."""
+    workflow_id = f"graph_qa_{uuid4().hex[:8]}"
+
+    workflow_agent.tool.workflow(
+        action="create",
+        workflow_id=workflow_id,
+        tasks=GRAPH_QA_WORKFLOW_TASKS,
+    )
+    workflow_agent.tool.workflow(
+        action="start",
+        workflow_id=workflow_id,
+        input=question,
+    )
+
+    search_metadata = _parse_search_output(search_entity_agent(question))
+    candidate_entities = search_metadata.get("candidate_entities", [])
+    search_summary = search_metadata.get("search_summary")
+
+    query_payload = json.dumps(
+        {
+            "question": question,
+            "candidate_entities": candidate_entities,
+            "search_summary": search_summary,
+        }
+    )
+    response = query_graph_agent(query_payload)
+
+    try:
+        workflow_agent.tool.workflow(action="status", workflow_id=workflow_id)
+    except Exception:
+        # Swallow workflow status errors so the CLI can continue responding.
+        pass
+
+    return response
 
 
 def main() -> int:
@@ -80,7 +137,7 @@ def main() -> int:
                 print("\nGoodbye!")
                 return 0
 
-            response = supervisor_agent(user_input)
+            response = run_graph_workflow(user_input)
             print("\nRESPONSE:\n")
             print(str(response))
 
