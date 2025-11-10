@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from strands.telemetry import StrandsTelemetry
 from src.strands.query_graph_agent import query_graph_agent
-from src.strands.search_entity_agent import search_entity_agent
+from src.strands.search_entities_agent import search_entities_agent
 from strands import Agent
 from src.strands.llm import ollama_model
 from strands_tools import workflow
@@ -30,7 +30,7 @@ telemetry.setup_meter(enable_otlp_exporter=True)
 
 WORKFLOW_SUPERVISOR_PROMPT = """
 You orchestrate the Knowledge Graph QA workflow. For every user question you:
-1. Trigger the semantic search stage (search_entity_agent) to gather candidate IRIs.
+1. Trigger the semantic search stage (search_entities_agent) to gather candidate IRIs.
 2. Pass the collected context into the querying stage (query_graph_agent) to execute SPARQL.
 3. Report the final synthesized answer grounded in Fuseki results.
 Always keep the workflow deterministic and document each stage with the workflow tool.
@@ -41,7 +41,7 @@ GRAPH_QA_WORKFLOW_TASKS = [
         "task_id": "entity_search",
         "description": "Map the user question to ontology IRIs via semantic search.",
         "system_prompt": """
-You are the Entity Discovery agent. Call `search_entity_agent` with the original user
+You are the Entity Discovery agent. Call `search_entities_agent` with the original user
 question and capture the JSON response so downstream agents can use it.
 """.strip(),
         "priority": 5,
@@ -52,7 +52,7 @@ question and capture the JSON response so downstream agents can use it.
         "dependencies": ["entity_search"],
         "system_prompt": """
 You are the Graph Query agent. Combine the user question with the JSON output returned
-by `search_entity_agent` and call `query_graph_agent` to obtain the final answer.
+by `search_entities_agent` and call `query_graph_agent` to obtain the final answer.
 """.strip(),
         "priority": 4,
     },
@@ -72,7 +72,7 @@ workflow_agent = create_workflow_agent()
 
 
 def _parse_search_output(raw_output: str) -> dict[str, Any]:
-    """Convert the search_entity_agent output into a dict for downstream tasks."""
+    """Convert the search_entities_agent output into a dict for downstream tasks."""
     try:
         parsed = json.loads(raw_output)
         if isinstance(parsed, dict):
@@ -97,15 +97,12 @@ def run_graph_workflow(question: str) -> str:
         input=question,
     )
 
-    search_metadata = _parse_search_output(search_entity_agent(question))
-    candidate_entities = search_metadata.get("candidate_entities", [])
-    search_summary = search_metadata.get("search_summary")
+    search_metadata = _parse_search_output(search_entities_agent(question))
 
     query_payload = json.dumps(
         {
             "question": question,
-            "candidate_entities": candidate_entities,
-            "search_summary": search_summary,
+            "search_context": search_metadata,
         }
     )
     response = query_graph_agent(query_payload)

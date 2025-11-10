@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from mcp import StdioServerParameters, stdio_client
 from strands import Agent, tool
@@ -9,6 +9,7 @@ from strands.tools.mcp import MCPClient, MCPAgentTool
 from src.strands.llm import ollama_model
 
 QUERY_LIMIT = 50
+MAX_QUERY_LIMIT = 200
 
 try:
     ONTOLOGY_TTL = (Path(__file__).resolve().parents[1] / "ontology.ttl").read_text(encoding="utf-8")
@@ -16,20 +17,17 @@ except FileNotFoundError:  # pragma: no cover
     ONTOLOGY_TTL = "Ontology file src/ontology.ttl is missing."
 
 SYSTEM_PROMPT = f"""
-You are a graph query analyst. Always ground answers in Fuseki query results.
+You are the Graph Query agent.
 
-Process:
-1. Candidate entities from `search_entity_agent` are supplied in the user message. Use them to understand relevant IRIs.
-2. You MUST call `query_graph` (a SELECT-only SPARQL executor) at least once before answering.
-3. When calling `query_graph`, provide a SELECT statement without PREFIX/BASE or LIMIT clauses (they are injected automatically) and pass `limit={QUERY_LIMIT}` unless the user requests a smaller slice.
-4. Use ontology terms from this schema when crafting queries:
+Instructions:
+- Always call the `query_graph` tool at least once before responding.
+- Write SELECT statements without PREFIX/BASE/LIMIT clauses; the tool injects them automatically.
+- Default to limit={QUERY_LIMIT} unless the user needs a different slice, but never exceed limit={MAX_QUERY_LIMIT}.
+- Base every answer on tool output, citing labels rather than IRIs when possible.
+- If the provided context is insufficient, ask for clarification instead of guessing.
+
+Schema snapshot for reference:
 {ONTOLOGY_TTL}
-
-Guidelines:
-- Construct concise SELECT statements that directly answer the question.
-- Prefer IRIs from the supplied candidate list or the `data:` namespace.
-- Summaries must reference human-readable labels, not raw IRIs.
-- If the question cannot be answered with the available context, ask for clarification instead of guessing.
 """
 
 
@@ -38,23 +36,7 @@ def _filter_query_tools(tools: List[MCPAgentTool]) -> List[MCPAgentTool]:
     return [tool for tool in tools if tool.mcp_tool.name == "query_graph"]
 
 
-def _summarize_candidates(candidates: List[Dict[str, Any]]) -> str:
-    """Render a text summary of candidate entities for the LLM."""
-    if not candidates:
-        return "No candidate entities were provided. Call search_entity_agent first."
-
-    lines = []
-    for idx, item in enumerate(candidates, start=1):
-        label = item.get("label", "Unknown")
-        entity_type = item.get("type", "Unknown")
-        uri = item.get("uri", "Unknown")
-        score = item.get("score")
-        score_str = f"{float(score):.3f}" if isinstance(score, (int, float)) else "n/a"
-        lines.append(f"{idx}. {label} ({entity_type}) -> {uri} [score={score_str}]")
-    return "\n".join(lines)
-
-
-def _parse_query_payload(raw_input: str) -> Dict[str, Any]:
+def _parse_query_payload(raw_input: str) -> Dict[str, object]:
     """Normalize user payloads into a dict containing question and search metadata."""
     if not raw_input.strip():
         return {}
@@ -72,10 +54,10 @@ def _parse_query_payload(raw_input: str) -> Dict[str, Any]:
 @tool
 def query_graph_agent(payload: str) -> str:
     """
-    Use Fuseki SELECT queries to answer a question. Expects JSON containing:
-    - question: original user query
-    - candidate_entities: search_entity_agent hits (optional but recommended)
-    - search_summary: human-readable summary of entities
+    Execute SELECT queries against Fuseki using the query_graph MCP tool.
+    Payload should include:
+    - question: the original user request (required)
+    - search_context: JSON from search_entities_agent (optional but recommended)
     """
 
     payload_dict = _parse_query_payload(payload)
@@ -83,19 +65,16 @@ def query_graph_agent(payload: str) -> str:
     if not question:
         return "Please provide a question to analyze."
 
-    candidates = payload_dict.get("candidate_entities") or []
-    search_summary = payload_dict.get("search_summary") or _summarize_candidates(candidates)
+    search_context = payload_dict.get("search_context")
+    context_block = json.dumps(search_context, indent=2) if search_context is not None else "None provided."
 
     user_message = f"""
 User question: {question}
 
-Candidate entities from semantic search (highest score first):
-{search_summary}
+Search context (from search_entities_agent):
+{context_block}
 
-Candidate entity JSON (first {len(candidates)} results):
-{json.dumps(candidates, indent=2) if candidates else "[]"}
-
-Use these IRIs to craft SELECT statements. Always call query_graph at least once with limit={QUERY_LIMIT} before answering.
+Use this context to craft one or more SELECT statements. Always call query_graph with limit={QUERY_LIMIT} before answering.
 """
 
     try:
@@ -135,8 +114,21 @@ if __name__ == "__main__":
             json.dumps(
                 {
                     "question": "Which services does the Platform team own?",
-                    "candidate_entities": [],
-                    "search_summary": "Platform team (Team) -> data:team/platform",
+                    "search_context": {
+                        "entities": [
+                            {
+                                "mention": "Platform team",
+                                "results": [
+                                    {
+                                        "label": "Platform Team",
+                                        "uri": "data:team/platform",
+                                        "type": "Team",
+                                        "score": 0.92,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
                 }
             )
         )
